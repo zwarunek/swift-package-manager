@@ -54,6 +54,57 @@ final class ModuleMapGeneration: XCTestCase {
         }
     }
 
+    func testUmbrellaHeaderMatchesCaseInsensitively() throws {
+        // A module `yoga` whose umbrella header is `yoga/Yoga.h` works on macOS (case-insensitive file system);
+        // it must not fall back to an umbrella directory, which pulls in every (possibly C++) header, elsewhere.
+        let root: AbsolutePath = .root
+
+        var fs = InMemoryFileSystem(emptyFiles:
+            root.appending(components: "include", "yoga", "Yoga.h").pathString,
+            root.appending(components: "include", "yoga", "event", "event.h").pathString,
+            root.appending(components: "Foo.c").pathString
+        )
+        ModuleMapTester("yoga", in: fs) { result in
+            result.check(contents: """
+            module yoga {
+                umbrella header "\(root.appending(components: "include", "yoga", "Yoga.h").pathString)"
+                export *
+            }
+
+            """)
+        }
+
+        fs = InMemoryFileSystem(emptyFiles:
+            root.appending(components: "include", "Foo.h").pathString,
+            root.appending(components: "Foo.c").pathString
+        )
+        ModuleMapTester("foo", in: fs) { result in
+            result.check(contents: """
+            module foo {
+                umbrella header "\(root.appending(components: "include", "Foo.h").pathString)"
+                export *
+            }
+
+            """)
+        }
+
+        // An exact match still wins over a case-insensitive one.
+        fs = InMemoryFileSystem(emptyFiles:
+            root.appending(components: "include", "yoga", "Yoga.h").pathString,
+            root.appending(components: "include", "yoga", "yoga.h").pathString,
+            root.appending(components: "Foo.c").pathString
+        )
+        ModuleMapTester("yoga", in: fs) { result in
+            result.check(contents: """
+            module yoga {
+                umbrella header "\(root.appending(components: "include", "yoga", "yoga.h").pathString)"
+                export *
+            }
+
+            """)
+        }
+    }
+
     func testOtherCases() throws {
         let root: AbsolutePath = .root
         var fs: InMemoryFileSystem

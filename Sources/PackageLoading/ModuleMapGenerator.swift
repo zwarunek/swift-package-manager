@@ -82,6 +82,27 @@ public struct ModuleMapGenerator {
         self.fileSystem = fileSystem
     }
 
+    /// Resolves `components` under `base`, matching each component exactly or, failing that, ignoring case.
+    ///
+    /// Packages are mostly written on macOS, whose default file system is case-insensitive, so a module `foo`
+    /// with an umbrella header `foo/Foo.h` works there (and in Xcode). Matching the same way keeps such packages
+    /// building on case-sensitive file systems instead of silently falling back to an umbrella directory.
+    private func existingFileIgnoringCase(_ base: Basics.AbsolutePath, _ components: [String]) -> Basics.AbsolutePath? {
+        var path = base
+        for component in components {
+            let exact = path.appending(component: component)
+            if fileSystem.exists(exact) {
+                path = exact
+                continue
+            }
+            guard let names = try? fileSystem.getDirectoryContents(path) else { return nil }
+            let matches = names.filter { $0.lowercased() == component.lowercased() }
+            guard matches.count == 1 else { return nil }
+            path = path.appending(component: matches[0])
+        }
+        return fileSystem.isFile(path) ? path : nil
+    }
+
     /// Inspects the file system at the public-headers directory with which the module map generator was instantiated, and returns the type of module map that applies to that directory.  This function contains all of the heuristics that implement module map policy for package targets; other functions just use the results of this determination.
     public func determineModuleMapType(observabilityScope: ObservabilityScope) -> ModuleMapType {
         // The following rules are documented at https://github.com/swiftlang/swift-package-manager/blob/main/Documentation/Usage.md#creating-c-language-targets.  To avoid breaking existing packages, do not change the semantics here without making any change conditional on the tools version of the package that defines the module.
@@ -121,7 +142,7 @@ public struct ModuleMapGenerator {
         let directories = entries.filter({ fileSystem.isDirectory($0) })
 
         // If 'PublicHeadersDir/ModuleName.h' exists, then use it as the umbrella header.
-        let umbrellaHeader = publicHeadersDir.appending(component: moduleName + ".h")
+        let umbrellaHeader = existingFileIgnoringCase(publicHeadersDir, [moduleName + ".h"]) ?? publicHeadersDir.appending(component: moduleName + ".h")
         if fileSystem.isFile(umbrellaHeader) {
             // In this case, 'PublicHeadersDir' is expected to contain no subdirectories.
             if directories.count != 0 {
@@ -138,11 +159,11 @@ public struct ModuleMapGenerator {
         }
 
         // If 'PublicHeadersDir/ModuleName/ModuleName.h' exists, then use it as the umbrella header.
-        let nestedUmbrellaHeader = publicHeadersDir.appending(components: moduleName, moduleName + ".h")
+        let nestedUmbrellaHeader = existingFileIgnoringCase(publicHeadersDir, [moduleName, moduleName + ".h"]) ?? publicHeadersDir.appending(components: moduleName, moduleName + ".h")
         if fileSystem.isFile(nestedUmbrellaHeader) {
             // In this case, 'PublicHeadersDir' is expected to contain no subdirectories other than 'ModuleName'.
             if directories.count != 1 {
-                diagnosticsEmitter.emit(.umbrellaHeaderParentDirHasSiblingDirectories(targetName: targetName, umbrellaHeader: nestedUmbrellaHeader, siblingDirs: directories.filter{ $0.basename != moduleName }))
+                diagnosticsEmitter.emit(.umbrellaHeaderParentDirHasSiblingDirectories(targetName: targetName, umbrellaHeader: nestedUmbrellaHeader, siblingDirs: directories.filter{ $0 != nestedUmbrellaHeader.parentDirectory }))
                 return .none
             }
             // In this case, 'PublicHeadersDir' is also expected to contain no header files.
