@@ -165,7 +165,10 @@ public final class PIFBuilder {
         printPIFManifestGraphviz: Bool = false,
         buildParameters: BuildParameters
     ) async throws -> PIFGenerationResult {
-        let encoder = prettyPrint ? JSONEncoder.makeWithDefaults() : JSONEncoder()
+        // Keys stay sorted without indentation too, so the same graph always produces the same bytes.
+        let encoder = prettyPrint
+            ? JSONEncoder.makeWithDefaults()
+            : JSONEncoder.makeWithDefaults(sortKeys: true, prettyPrint: false, escapeSlashes: false)
 
         if !preservePIFModelStructure {
             encoder.userInfo[.encodeForSwiftBuild] = true
