@@ -1102,6 +1102,10 @@ public final class SwiftBuildSystem: SPMBuildCore.BuildSystem {
             overridesSynthesized.set(value: value, for: key)
         }
         params.overrides.synthesized = overridesSynthesized
+        // As with xcodebuild, an xcconfig file named by XCODE_XCCONFIG_FILE overrides the settings of every target.
+        if let environmentConfigPath = Environment.current["XCODE_XCCONFIG_FILE"], !environmentConfigPath.isEmpty {
+            params.overrides.environmentConfigPath = environmentConfigPath
+        }
         params.activeRunDestination = runDestination
 
         return params
