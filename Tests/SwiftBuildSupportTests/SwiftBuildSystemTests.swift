@@ -27,6 +27,8 @@ import SWBBuildService
 
 import _InternalTestSupport
 
+import struct Foundation.UUID
+
 func withInstantiatedSwiftBuildSystem(
     fromFixture fixtureName: String,
     buildParameters: BuildParameters? = nil,
@@ -150,6 +152,37 @@ extension PackageModel.Sanitizer {
     .requireCompiledWith6_3OrLater(because: "https://github.com/swiftlang/swift-corelibs-foundation/pull/5269")
 )
 struct SwiftBuildSystemTests {
+
+    @Test
+    func xcodeXCConfigFileSetsEnvironmentConfigOverrides() async throws {
+        #expect(SwiftBuildSystem.environmentConfigOverridesPath(in: ["XCODE_XCCONFIG_FILE": "/tmp/ci.xcconfig"]) == "/tmp/ci.xcconfig")
+        #expect(SwiftBuildSystem.environmentConfigOverridesPath(in: ["XCODE_XCCONFIG_FILE": ""]) == nil)
+        #expect(SwiftBuildSystem.environmentConfigOverridesPath(in: [:]) == nil)
+
+        try await withInstantiatedSwiftBuildSystem(
+            fromFixture: "PIFBuilder/Simple",
+        ) { swiftBuild, service, session, _, _ in
+            func parameters() async throws -> SWBBuildParameters {
+                try await swiftBuild.makeBuildParameters(
+                    service: service,
+                    session: session,
+                    symbolGraphOptions: nil,
+                    setToolchainSetting: false,
+                    shouldDisableSandbox: false,
+                )
+            }
+            let path = "/tmp/xcconfig-\(UUID().uuidString).xcconfig"
+            let withFile = try await Environment.makeCustom(["XCODE_XCCONFIG_FILE": path]) {
+                try await parameters()
+            }
+            #expect(withFile.overrides.environmentConfigPath == path)
+
+            let withoutFile = try await Environment.makeCustom(["XCODE_XCCONFIG_FILE": ""]) {
+                try await parameters()
+            }
+            #expect(withoutFile.overrides.environmentConfigPath == nil)
+        }
+    }
 
     @Test
     func replIncludesGeneratedModuleMaps() async throws {
