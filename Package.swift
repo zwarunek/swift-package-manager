@@ -1187,7 +1187,13 @@ if !shouldUseSwiftBuildFramework {
         .product(name: "SWBBuildService", package: "swift-build"),
     ]
 
-    if ProcessInfo.processInfo.environment["SWIFTCI_USE_LOCAL_DEPS"] == nil {
+    if let swiftBuildPath = ProcessInfo.processInfo.environment["SWIFTPM_SWIFT_BUILD_PATH"] {
+        // Build against a local swift-build checkout (e.g. a fork with Linux fixes).
+        package.dependencies += [
+            .package(path: swiftBuildPath),
+            .package(url: "https://github.com/swiftlang/swift-tools-protocols.git", branch: relatedDependenciesBranch),
+        ]
+    } else if ProcessInfo.processInfo.environment["SWIFTCI_USE_LOCAL_DEPS"] == nil {
         package.dependencies += [
             .package(url: "https://github.com/swiftlang/swift-build.git", branch: relatedDependenciesBranch),
             .package(url: "https://github.com/swiftlang/swift-tools-protocols.git", branch: relatedDependenciesBranch),
