@@ -27,11 +27,15 @@ import SWBBuildService
 
 import _InternalTestSupport
 
+import struct Foundation.Data
+import class Foundation.JSONSerialization
+
 func withInstantiatedSwiftBuildSystem(
     fromFixture fixtureName: String,
     buildParameters: BuildParameters? = nil,
     createREPLProduct: Bool = false,
     logLevel: Basics.Diagnostic.Severity = .warning,
+    onPackageGraphLoad: (@Sendable () -> Void)? = nil,
     do doIt: @escaping (SwiftBuildSupport.SwiftBuildSystem, SWBBuildService, SWBBuildServiceSession, TestingObservability, BuildParameters,) async throws -> (),
 ) async throws {
     let fileSystem = Basics.localFileSystem
@@ -60,7 +64,8 @@ func withInstantiatedSwiftBuildSystem(
             )
             let rootInput = PackageGraphRootInput(packages: [fixturePath], dependencies: [])
             let graphLoader = {
-                try await workspace.loadPackageGraph(
+                onPackageGraphLoad?()
+                return try await workspace.loadPackageGraph(
                     rootInput: rootInput,
                     observabilityScope: observabilitySystem.topScope
                 )
@@ -150,6 +155,30 @@ extension PackageModel.Sanitizer {
     .requireCompiledWith6_3OrLater(because: "https://github.com/swiftlang/swift-corelibs-foundation/pull/5269")
 )
 struct SwiftBuildSystemTests {
+
+    @Test
+    func buildLoadsThePackageGraphOnceAndWritesACompactPIF() async throws {
+        let graphLoads = ThreadSafeBox<Int>(0)
+        try await withInstantiatedSwiftBuildSystem(
+            fromFixture: "PIFBuilder/Simple",
+            onPackageGraphLoad: { graphLoads.mutate { $0 += 1 } },
+        ) { swiftBuild, _, _, _, buildParameters in
+            _ = try await swiftBuild.build(subset: .allExcludingTests, buildOutputs: [])
+            // compilePlugins(in:) loads the graph and the PIF is built from that same graph.
+            #expect(graphLoads.get() == 1)
+
+            // The PIF written for Swift Build has no indentation, and is still one valid JSON document.
+            let pif = try Basics.localFileSystem.readFileContents(buildParameters.pifManifest).contents
+            #expect(!pif.isEmpty)
+            #expect(!pif.contains(UInt8(ascii: "\n")))
+            #expect(throws: Never.self) { try JSONSerialization.jsonObject(with: Data(pif)) }
+
+            // The public entry points, which long-lived clients call repeatedly, load the graph again each time.
+            _ = try await swiftBuild.generatePIF(preserveStructure: false)
+            _ = try await swiftBuild.generatePIF(preserveStructure: false)
+            #expect(graphLoads.get() == 3)
+        }
+    }
 
     @Test
     func replIncludesGeneratedModuleMaps() async throws {
