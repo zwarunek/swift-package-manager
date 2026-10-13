@@ -468,7 +468,9 @@ public final class SwiftBuildSystem: SPMBuildCore.BuildSystem {
             return result
         }
 
-        try await writePIF(buildParameters: self.buildParameters)
+        // compilePlugins(in:) has just loaded the package graph; build the PIF from that graph instead of loading
+        // all manifests and walking every target's sources a second time.
+        try await writePIF(buildParameters: self.buildParameters, reloadPackageGraph: false)
 
         guard !self.observabilityScope.errorsReported else {
             throw Diagnostics.fatalError
@@ -1401,10 +1403,23 @@ public final class SwiftBuildSystem: SPMBuildCore.BuildSystem {
     }
 
     public func generatePIFAndAccompanyingMetadata(preserveStructure: Bool) async throws -> PIFGenerationResult {
+        try await generatePIFAndAccompanyingMetadata(preserveStructure: preserveStructure, prettyPrint: true, reloadPackageGraph: true)
+    }
+
+    /// - Parameter reloadPackageGraph: Load the package graph again rather than using the one already loaded
+    ///   by this build system, so that long-lived clients see changes made since the last call.
+    private func generatePIFAndAccompanyingMetadata(
+        preserveStructure: Bool,
+        prettyPrint: Bool,
+        reloadPackageGraph: Bool
+    ) async throws -> PIFGenerationResult {
         pifBuilder = .init()
-        packageGraph = .init()
+        if reloadPackageGraph {
+            packageGraph = .init()
+        }
         let pifBuilder = try await getPIFBuilder()
         return try await pifBuilder.generatePIF(
+            prettyPrint: prettyPrint,
             preservePIFModelStructure: preserveStructure,
             printPIFManifestGraphviz: buildParameters.printPIFManifestGraphviz,
             buildParameters: buildParameters
@@ -1416,7 +1431,17 @@ public final class SwiftBuildSystem: SPMBuildCore.BuildSystem {
     }
 
     public func writePIF(buildParameters: BuildParameters) async throws {
-        let pif = try await generatePIF(preserveStructure: false)
+        try await writePIF(buildParameters: buildParameters, reloadPackageGraph: true)
+    }
+
+    /// Writes the PIF that Swift Build loads. It is written without indentation: only Swift Build reads it, and
+    /// for a large package graph it is tens of megabytes that Swift Build parses on every build.
+    private func writePIF(buildParameters: BuildParameters, reloadPackageGraph: Bool) async throws {
+        let pif = try await generatePIFAndAccompanyingMetadata(
+            preserveStructure: false,
+            prettyPrint: false,
+            reloadPackageGraph: reloadPackageGraph
+        ).pif
         try self.fileSystem.writeIfChanged(path: buildParameters.pifManifest, string: pif)
     }
 
